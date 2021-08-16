@@ -87,14 +87,16 @@ int main(int argc, char **argv)
 	
     Tello tello;
     if (!tello.Bind()) return 0;
+    //tello.SendCommand("takeoff");
+    //while (!(tello.ReceiveResponse()));
+    //tello.SendCommand("land");
+    //while (!(tello.ReceiveResponse()));
     
-    //tello.SendCommand("Command");
-    //while (!(tello.ReceiveResponse()));
     // Main loop
-    //tello.SendCommand("streamon");
-    //while (!(tello.ReceiveResponse()));
-    //VideoCapture camera{{"udp://0.0.0.0:11111?overrun_nofatal=1&fifo_size=500000"}, cv::CAP_ANY};
-    VideoCapture camera(0);
+    tello.SendCommand("streamon");
+    while (!(tello.ReceiveResponse()));
+    VideoCapture camera{{"udp://0.0.0.0:11111?overrun_nofatal=1&fifo_size=10000000"}, cv::CAP_ANY};
+    //VideoCapture camera(0);
     camera.set(CV_CAP_PROP_BUFFERSIZE,1);
     if(!camera.isOpened()) {
     	cerr << "BASA camera not opened" << endl;
