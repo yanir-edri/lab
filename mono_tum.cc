@@ -50,7 +50,7 @@ void commandTello(Tello &tello, string com, int dur = 0) {
     cout << "sending command " << com << endl;
     tello.SendCommand(com);
     while (!tello.ReceiveResponse());
-    if (dur > 0) sleep(dur);
+    if (dur > 0) usleep(dur*1000000);
 }
 void moveTello(Tello &tello, string dir, int x, int dur = 0) {
     commandTello(tello, dir + " " + to_string(x), dur);
@@ -63,6 +63,8 @@ void takeOff(Tello &tello) {
 void land(Tello &tello) { commandTello(tello, "land"); }
 void scan(Tello &tello) {
     int angle = 0, v = sra;
+    cin >> angle;
+    scanFinished.store(1);
     while (angle < 360) {
         if (droneLocalized.load()) {
             moveTello(tello, "cw", v, 1);
@@ -84,6 +86,7 @@ void scan(Tello &tello) {
 }
 
 void saveMap(ORB_SLAM2::System &SLAM) {
+    cout << "saving map..." << endl;
     std::vector<ORB_SLAM2::MapPoint *> mapPoints =
         SLAM.GetMap()->GetAllMapPoints();
     std::ofstream pointData;
@@ -97,6 +100,25 @@ void saveMap(ORB_SLAM2::System &SLAM) {
         }
     }
     pointData.close();
+    cout << "done" << endl;
+}
+cv::Mat positionToVector(cv::Mat m) {
+    //as written in https://math.stackexchange.com/a/84202
+    cv::Mat R = m(cv::Rect(0,0,3,3));
+    cv::Mat T = m(cv::Rect(3,0,1,3));
+    R = R.t();
+    return -R*T;
+}
+//pair<double,double> linearFit()
+
+void savePositions(vector<cv::Mat>& P)  {
+    cout << "saving positions..." << endl;
+    std::ofstream posStream("/tmp/dronePosition.csv");
+    for(cv::Mat p : P) {
+        posStream << p.at<float>(0,0) << ',' << p.at<float>(0,1) << ',' << p.at<float>(0,2) << endl;
+    }
+    posStream.close();
+    cout << "done." << endl;
 }
 
 int ret = 0, finish = 0, scanCalled = 0;
@@ -114,7 +136,6 @@ void takePicture() {
         ret = 1;
     }
 }
-
 int main(int argc, char **argv) {
    cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << endl;
     if (argc != 3) {
@@ -131,17 +152,17 @@ int main(int argc, char **argv) {
     // process frames.
     ORB_SLAM2::System SLAM(argv[1], argv[2], ORB_SLAM2::System::MONOCULAR,
                            true);
-    
 
     cout << endl << "-------" << endl;
     cout << "Start processing..." << endl;
     
     // Main loop
-    takeOff(tello);
+    //takeOff(tello);
     thread scan_thread;
     while (!ret) usleep(5000);
     int i = 0;
     cv::Mat trackRet;
+    vector<cv::Mat> positions;
     while (!scanFinished.load()) {
         i++;
         if (i % 10 != 0) usleep(5000);
@@ -155,10 +176,15 @@ int main(int argc, char **argv) {
             scan_thread = thread(scan, std::ref(tello));
             scanCalled = 1;
         }
+        if(!trackRet.empty()) {
+            cout << "writing position.." << endl;
+            positions.push_back(positionToVector(trackRet));
+        }
     }
     finish = 1;
     // Stop all threads
     saveMap(SLAM);
+    savePositions(positions);
     SLAM.Shutdown();
     tello.SendCommand("streamoff");
     // imageChoice = -100;
