@@ -75,13 +75,24 @@ void txt_to_pts(const string &file, vp3d& pts) {
     for(auto& p : pts) rd >> p.x >> p.y >> p.z;
     rd.close();
 }
+
+//fills vector with points from txt file
+void txt_to_pts_v2(const string &file, vp3d& pts) {
+    ifstream rd(file + ".txt");
+    ld d1, d2, d3;
+    for(auto& p : pts) rd >> p.x >> p.y >> p.z >> d1 >> d2 >> d3;
+    rd.close();
+}
 //combine csv_to_txt,txt_to_pts, return size
 int csv_to_pts(const string& file, vp3d& pts) {
     int n = csv_to_txt(file);
     pts.resize(n);
-    txt_to_pts(file,pts);
+//    txt_to_pts(file,pts);
+    txt_to_pts_v2(file,pts);
     return n;
 }
+#define DBG_ALGO 0
+//credits to the group of Peleg
 namespace algo {
     line linear_fit(const vp2d& pts) {
         //assume size > 1
@@ -113,7 +124,14 @@ namespace algo {
     ld dist(line l, p2d p) {
         return abs((l.m*p.x) - p.z + l.b)/sqrtl((l.m*l.m) + 1);
     }
-    ld global_best_dist = 1e9, global_best_angle = 0;
+    p2d func(const vp2d& sec) {
+        int n = int(sec.size());
+        p2d avg{0.0,0.0};
+        for(auto p : sec) avg.x += p.x, avg.z += p.z;
+        return avg/n;
+//        return sec[n/2];
+    }
+    ld global_best_dist = -1, global_best_angle = 0;
     pld findAngle(const vp2d& pts, int sa, int off) {
         p2d c = center(pts);
         int sc = 360/sa;
@@ -124,21 +142,18 @@ namespace algo {
             sec[idx].push_back(p);
         }
         //b for best
-        ld bca = -1.0; int bi = -1;
+        ld bd = -1.0; int bi = -1;
         for(int i = 0; i < sc; ++i) {
             auto& s = sec[i];
             if(int(s.size())<=1) continue;
-            line l = linear_fit(s);
-            p2d lv = l.vec(), lv2 = -lv;
-            //sector vector
-            p2d sv = p2d::polar((i+1)*sa)-p2d::polar(i*sa);
-            //cos(angle)
-            ld ca = min(sv.dot_norm(lv),sv.dot_norm(lv2));
-            if(bi==-1 || ca+epsilon<bca) bi = i, bca = ca;
-            if(ca+epsilon < global_best_dist) {
-                global_best_dist = ca;
-                global_best_angle = i*sa+off;
-            }
+            sort(s.begin(),s.end(),[c](p2d a, p2d b) {
+                return (a-c).abs() < (b-c).abs();
+            });
+
+            p2d point = func(s);
+            ld cd = (point-c).abs();
+            if(cd-epsilon > bd) bd = cd, bi = i;
+            if(cd-epsilon > global_best_dist) global_best_dist=cd,global_best_angle = (point-c).positive_angle();
         }
         if(bi==-1) return {500.0,500.0};
         return {bi*sa+off,(bi+1)*sa+off};
@@ -166,6 +181,11 @@ namespace algo {
         if(valid==0) { cout << ":(((((((" << endl; exit(1); }
         cout << "global best angle is " << global_best_angle << endl;
         cout << "center is " << center(pts) << endl;
+        {
+            p2d p = pts[0], c = center(pts);
+            for(auto P : pts) if((P-c).abs()-epsilon>(p-c).abs()) p = P;
+            cout << "farthest point is " << p << ", angle is " << p.positive_angle() << endl;
+        }
         ld fans = 0.0;
         for(auto p : ans ) fans += (p.x+p.y)/2.0;
         return fans/valid;
@@ -178,7 +198,8 @@ namespace algo {
 int main() {
 
     vp3d pts3;
-    int n = csv_to_pts("points",pts3);
+    int n = csv_to_pts("pointData0",pts3);
+//    int n = csv_to_pts("points",pts3);
     vp2d pts(n);
     for(int i = 0; i < n; ++i) pts[i] = p2d(pts3[i]);
     ld ang = algo::findAngle(pts);
