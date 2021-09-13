@@ -18,6 +18,8 @@
  * along with ORB-SLAM2. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <iostream>
+#include <math.h>
 #include <Converter.h>
 #include <System.h>
 #include <ctello.h>
@@ -32,6 +34,7 @@
 #include <mutex>
 #include <opencv2/core/core.hpp>
 #include <thread>
+#include <complex>
 
 #include "opencv2/opencv.hpp"
 using namespace std;
@@ -43,16 +46,20 @@ using namespace ctello;
 // Scan Vertical Movement
 #define svm 20
 
+#define DBG 1
+#include "algo.cc"
+
 atomic<int> scanFinished(0);
 atomic<int> droneLocalized(0);
 
-void commandTello(Tello &tello, string com, int dur = 0) {
+void commandTello(Tello &tello, string com, double dur = 0.0) {
     cout << "sending command " << com << endl;
     tello.SendCommand(com);
     while (!tello.ReceiveResponse());
-    if (dur > 0) usleep(dur*1000000);
+    if (dur > epsilon) usleep(int(dur*1000000));
+
 }
-void moveTello(Tello &tello, string dir, int x, int dur = 0) {
+void moveTello(Tello &tello, string dir, int x, double dur = 0.0) {
     commandTello(tello, dir + " " + to_string(x), dur);
 }
 void takeOff(Tello &tello) {
@@ -61,11 +68,13 @@ void takeOff(Tello &tello) {
     while (!(tello.ReceiveResponse()));
 }
 void land(Tello &tello) { commandTello(tello, "land"); }
+p3d pos,rot;
+
 void scan(Tello &tello) {
     int angle = 0, v = sra;
     cin >> angle;
     scanFinished.store(1);
-    while (angle < 360) {
+    while (angle < 360 || !droneLocalized.load()) {
         if (droneLocalized.load()) {
             moveTello(tello, "cw", v, 1);
             angle += v;
@@ -81,7 +90,45 @@ void scan(Tello &tello) {
         moveTello(tello, "down", svm, 1);
     }
     // for now, land immeidiatly
-    land(tello);
+    //land(tello);
+    //scanFinished.store(1);
+}
+
+ld findScale(Tello& tello) {
+    cout << "findScale called" << endl;
+    p3d cp = pos;
+    int d = 0;
+    while(d < 60) {
+        moveTello(tello,"forward",20,2);
+        d += 20;
+        while(!droneLocalized.load()) usleep(5000);
+    }
+    p3d np = pos;
+    moveTello(tello,"back",60,2);
+    //scale*diff = how much to send tello
+    //scale*diff = 60
+    //scale = 60/diff
+    cout << "found scale!" << endl;
+    return abs(60/(np-cp).abs());
+}
+void moveToPoint(Tello& tello, p2d nt, ld scale);
+void writeToFile(string filename, string content ){
+    std::ofstream stream(filename);
+    cout << "writing to file " << filename << " that " << content << endl;
+    stream << content << endl;
+    stream.close();
+}
+void secondThread(Tello& tello) {
+    //scan(tello);
+    cout << "finished scan" << endl;
+    ld sc = findScale(tello);
+    writeToFile("/tmp/scale_log.txt","scale is " + to_string(sc));
+    moveToPoint(tello, {0.0,0.5},sc);
+    int x;
+    cin >> x;
+    cout << "sleeping..." << endl;
+    usleep(2000000);
+    cout << "LEETSSS GOOOO" << endl;
     scanFinished.store(1);
 }
 
@@ -100,22 +147,127 @@ void saveMap(ORB_SLAM2::System &SLAM) {
         }
     }
     pointData.close();
-    cout << "done" << endl;
+    
 }
-cv::Mat positionToVector(cv::Mat m) {
-    //as written in https://math.stackexchange.com/a/84202
+
+cv::Mat op_v(cv::Mat m) {
     cv::Mat R = m(cv::Rect(0,0,3,3));
     cv::Mat T = m(cv::Rect(3,0,1,3));
     R = R.t();
     return -R*T;
 }
-//pair<double,double> linearFit()
+p3d matToPoint(cv::Mat m) {
+    ld x = ld(m.at<float>(0));
+    ld y = ld(m.at<float>(1));
+    ld z = ld(m.at<float>(2));
+    return {x,y,z};
+}
+p3d positionToVector(cv::Mat m) {
+    //as written in https://math.stackexchange.com/a/84202
+    cv::Mat R = m(cv::Rect(0,0,3,3));
+    cv::Mat T = m(cv::Rect(3,0,1,3));
+    cv::Mat res = -R.t()*T;
+    return matToPoint(res);
+}
+p3d positionToRotation(cv::Mat m) {
+    cv::Mat res = m(cv::Rect(0,0,3,3)).row(2).t();
+    return matToPoint(res);
+}
 
-void savePositions(vector<cv::Mat>& P)  {
+
+#define PI 3.141592653589793238462643383279502884L
+
+
+
+p2d target_position;
+
+
+
+ld calcRot(p2d r) { //calculate rotation to given vector
+    ld angle = arg(complex<ld>(r.x,r.z))-arg(complex<ld>(rot.x,rot.z));
+    angle = (angle*180)/PI;
+    if(abs(angle)<epsilon) return 0.0;
+    return angle;
+}
+void rotateToVector(Tello& tello, p2d r) { //rotate tello to given vector
+    ld ar = calcRot(r);
+
+    cout << "angle to rotate = " <<ar << endl;
+    if(abs(ar) < epsilon) return;
+    if(ar < 0) moveTello(tello,"ccw",-ar,2);
+    else moveTello(tello,"cw",ar,2);
+}
+
+void moveToPoint(Tello& tello, p2d nt, ld scale) {
+	target_position = nt;
+    p2d dir = nt-p2d(pos);
+    cout << "dir is " << dir << endl;
+    rotateToVector(tello, dir);
+    ld dist = dir.abs()*scale;
+    cout << "calling forward with " << int(dist) << endl;
+    moveTello(tello,"forward",int(dist),2);
+}
+using vi = vector<int>;
+using vld = vector<ld>;
+int* moveToDoor(ld* pointsX, ld* pointsZ, int pointCount, ld center[3])
+{
+	//start by calculating the doors location:
+    const int sa = 15;
+	const int sc = 360/sa;
+    vld sumX(sc,0), sumZ(sc,0), sumXZ(sc,0),sumXX(sc,0),m(sc,0),b(sc,0);
+    ld xDiff,zDiff;
+	int sector;
+	vi spSize(sc,0);
+	//divide into sectors and calculate needed values
+	for(int i = 0; i < pointCount; i++) {
+		xDiff = pointsX[i] - center[0];
+		zDiff = pointsZ[i] - center[2];
+		sector = (atan2l(zDiff, xDiff)*180/PI)/sa;
+		sumX[sector] += pointsX[i];
+		sumZ[sector] += pointsZ[i];
+		sumXZ[sector] += pointsX[i] * pointsZ[i];
+		sumXX[sector] += pointsX[i] * pointsX[i];
+		spSize[i]++;
+	}
+	
+	//fit line for every sector's points, and find line closest to center
+	int closestLine = -1;
+	ld minDistance, currDistance;
+	for(int i = 0; i < sc; i++) {
+		m[i] = ((spSize[i]*sumXZ[i]) - (sumX[i]*sumZ[i])) / ((spSize[i]*sumXX[i]) - (sumX[i]*sumX[i]));
+		b[i] = (sumZ[i] - (m[i]*sumX[i])) / spSize[i];
+		currDistance = abs((m[i]*center[0]) - center[2] + b[i])/sqrtl((m[i]*m[i]) + 1);
+		if(i == 0 || minDistance > currDistance) {
+			closestLine = i;
+			minDistance = currDistance;
+		}
+	}
+
+	//the sector with the door is the sector with the closest line to the center
+	
+	//find the point on the line which is closest to the center
+	ld closestX, closestZ;
+	closestX = (m[closestLine]*center[2] + center[0] - m[closestLine]*b[closestLine])/((m[closestLine]*m[closestLine]) + 1);
+	closestZ = (m[closestLine]*center[0] + m[closestLine]*m[closestLine]*center[2] + b[closestLine])/((m[closestLine]*m[closestLine]) + 1);
+
+	//start by moving to the point on the line which is closest to the center
+	//MoveToPoint(closestX, closestZ);
+
+	//now move in the direction of exit
+	//@yanir think of something
+
+}
+
+
+
+
+
+
+void savePositions(vector<p3d>& P)  {
     cout << "saving positions..." << endl;
     std::ofstream posStream("/tmp/dronePosition.csv");
-    for(cv::Mat p : P) {
-        posStream << p.at<float>(0,0) << ',' << p.at<float>(0,1) << ',' << p.at<float>(0,2) << endl;
+    for(auto p : P) {
+        posStream << p.x << ',' << p.y << ',' << p.z << endl;
     }
     posStream.close();
     cout << "done." << endl;
@@ -123,7 +275,9 @@ void savePositions(vector<cv::Mat>& P)  {
 
 int ret = 0, finish = 0, scanCalled = 0;
 cv::Mat im;
-double t = 0;
+
+
+
 
 void takePicture() {
     VideoCapture capture{"udp://0.0.0.0:11111?fifo_size=100000", cv::CAP_FFMPEG};
@@ -157,13 +311,14 @@ int main(int argc, char **argv) {
     cout << "Start processing..." << endl;
     
     // Main loop
-    //takeOff(tello);
+    takeOff(tello);
     thread scan_thread;
     while (!ret) usleep(5000);
     int i = 0;
     cv::Mat trackRet;
-    vector<cv::Mat> positions;
-    while (!scanFinished.load()) {
+    vector<p3d> positions;
+    bool tmoveUp = false;
+    while(!scanFinished.load()) {
         i++;
         if (i % 10 != 0) usleep(5000);
         if (im.empty()) {
@@ -171,14 +326,21 @@ int main(int argc, char **argv) {
             exit(1);
         }
         trackRet = SLAM.TrackMonocular(im, i);
-        droneLocalized.store(!trackRet.empty());
-        if (!trackRet.empty() && !scanCalled) {
-            scan_thread = thread(scan, std::ref(tello));
+        bool localized = !trackRet.empty();
+        droneLocalized.store(localized);
+        if(localized) {
+            pos = positionToVector(trackRet);
+            rot = positionToRotation(trackRet);
+            cout << "pos="<<pos<<",rot="<<rot<<",ap="<< op_v(trackRet) << '\n';
+            cout << "angle=" << p2d(rot).angle() << '\n';
+            positions.push_back(pos);
+        }
+        if (localized && !scanCalled) {
+            scan_thread = thread(secondThread, std::ref(tello));
             scanCalled = 1;
         }
-        if(!trackRet.empty()) {
-            cout << "writing position.." << endl;
-            positions.push_back(positionToVector(trackRet));
+        if(!localized&& !scanCalled) {
+            if(i>100&&!tmoveUp) moveTello(tello,"up",20),tmoveUp=1;   
         }
     }
     finish = 1;
@@ -187,6 +349,7 @@ int main(int argc, char **argv) {
     savePositions(positions);
     SLAM.Shutdown();
     tello.SendCommand("streamoff");
+    land(tello);
     // imageChoice = -100;
     // Save camera trajectory
     SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");

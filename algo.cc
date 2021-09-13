@@ -1,8 +1,6 @@
 #include <bits/stdc++.h>
 #define fin(i,s,n) for(auto i = s; i < n; ++i)
 #define pb push_back
-#define x first
-#define y second
 using namespace std;
 using ld = long double;
 const ld epsilon = 1e-6;
@@ -29,6 +27,12 @@ struct p2d {
 struct p3d {
     ld x, y, z;
     explicit operator p2d() { return {x, z}; }
+    ld operator*(p3d o) { return (x * o.x + y * o.y + z * o.z); }
+    p3d operator/(ld o) { return {x/o,y/o,z/o}; }
+    p3d operator+(p3d o) { return {x + o.x, y + o.y, z + o.z}; }
+    p3d operator-() { return {-x, -y, -z}; }
+    p3d operator-(p3d o) { return {x - o.x, y-o.y, z - o.z}; }
+    ld abs() { return sqrtl(x * x + y * y + z * z); }
 };
 using vp2d = vector<p2d>;
 using vp3d = vector<p3d>;
@@ -46,12 +50,12 @@ ostream &operator<<(ostream &os, p3d p) { return os << '{' << p.x << ',' << p.y 
 template<class A, class B> ostream& operator<<(ostream& os, pair<A,B> p) {
     return os << '{' << p.first << ',' << p.second << '}';
 }
-template<class T> ostream& operator<<(ostream& os, vector<T> v) {
+/*template<class T> ostream& operator<<(ostream& os, vector<T> v) {
     if(v.empty()) return os << "[]";
     os << '[' << v[0];
     fin(i,1,int(v.size())) os << ',' << v[i];
     return os << ']';
-}
+}*/
 
 //converts csv file to txt file, returns number of points
 int csv_to_txt(const string &file) {
@@ -165,7 +169,7 @@ namespace algo {
         while(!as.empty()&&as.back().first>400.0) as.pop_back();
          if(as.empty()) return {500.0,500.0};
         int n = int(as.size());
-        cout << "findAngle("<<sa<<") -> " << as << endl;
+        //cout << "findAngle("<<sa<<") -> " << as << endl;
         return as[n/2];
     }
     ld findAngle(const vp2d& pts) {
@@ -175,26 +179,26 @@ namespace algo {
         for(int v : sas) {
             pld c = findAngle(pts,v);
             if(c.first>400.0) continue;
-            cout << "findAngle("<<v<<") was valid and returned " << c << endl;
+            //cout << "findAngle("<<v<<") was valid and returned " << c << endl;
             ++valid, ans.pb(c);
         }
         if(valid==0) { cout << ":(((((((" << endl; exit(1); }
-        cout << "global best angle is " << global_best_angle << endl;
-        cout << "center is " << center(pts) << endl;
+        //cout << "global best angle is " << global_best_angle << endl;
+        //cout << "center is " << center(pts) << endl;
         {
             p2d p = pts[0], c = center(pts);
             for(auto P : pts) if((P-c).abs()-epsilon>(p-c).abs()) p = P;
-            cout << "farthest point is " << p << ", angle is " << p.positive_angle() << endl;
+            //cout << "farthest point is " << p << ", angle is " << p.positive_angle() << endl;
         }
         ld fans = 0.0;
-        for(auto p : ans ) fans += (p.x+p.y)/2.0;
+        for(auto p : ans ) fans += (p.first+p.second)/2.0;
         return fans/valid;
     }
 
 
 }
 
-
+/*
 int main() {
 
     vp3d pts3;
@@ -207,3 +211,4 @@ int main() {
 
     return 0;
 }
+*/
