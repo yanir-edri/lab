@@ -1,61 +1,5 @@
-#include <bits/stdc++.h>
-#define fin(i,s,n) for(auto i = s; i < n; ++i)
-#define pb push_back
-using namespace std;
-using ld = long double;
-const ld epsilon = 1e-6;
-struct p2d {
-    ld x, z;
-    ld operator*(p2d o) { return (x * o.x + z * o.z); }
-    p2d operator/(ld o) { return {x/o,z/o}; }
-    p2d operator+(p2d o) { return {x + o.x, z + o.z}; }
-    p2d operator-() { return {-x, -z}; }
-    p2d operator-(p2d o) { return {x - o.x, z - o.z}; }
-    ld abs() { return sqrtl(x * x + z * z); }
-    ld angle() { return atan2l(z, x)*180.0/M_PI; }
-    ld positive_angle() {
-        ld a = angle();
-        if(a < -epsilon) a += 360.0;
-        return a;
-    }
-    ld dot_norm(p2d o) {
-        return ((*this)*o)/(abs()*o.abs());
-    }
-    static p2d polar(ld theta) { return {cos(theta), sin(theta)}; }
-};
-
-struct p3d {
-    ld x, y, z;
-    explicit operator p2d() { return {x, z}; }
-    ld operator*(p3d o) { return (x * o.x + y * o.y + z * o.z); }
-    p3d operator/(ld o) { return {x/o,y/o,z/o}; }
-    p3d operator+(p3d o) { return {x + o.x, y + o.y, z + o.z}; }
-    p3d operator-() { return {-x, -y, -z}; }
-    p3d operator-(p3d o) { return {x - o.x, y-o.y, z - o.z}; }
-    ld abs() { return sqrtl(x * x + y * y + z * z); }
-};
-using vp2d = vector<p2d>;
-using vp3d = vector<p3d>;
-using vi = vector<int>;
-using pld = pair<ld,ld>;
-using vld = vector<ld>;
-using vpld = vector<pld>;
-struct line {
-    ld m,b;
-    p2d vec() { if(m==INFINITY) return {0.0,1.0}; return {1.0,m}; }
-};
-ostream& operator<<(ostream& os, line l) { return os << "(m=" << l.m <<",b="<<l.b<<")"; }
-ostream &operator<<(ostream &os, p2d p) { return os << '{' << p.x << ',' << p.z << '}'; }
-ostream &operator<<(ostream &os, p3d p) { return os << '{' << p.x << ',' << p.y << ',' << p.z << '}'; }
-template<class A, class B> ostream& operator<<(ostream& os, pair<A,B> p) {
-    return os << '{' << p.first << ',' << p.second << '}';
-}
-/*template<class T> ostream& operator<<(ostream& os, vector<T> v) {
-    if(v.empty()) return os << "[]";
-    os << '[' << v[0];
-    fin(i,1,int(v.size())) os << ',' << v[i];
-    return os << ']';
-}*/
+#include <iostream>
+#include "common.cc"
 
 //converts csv file to txt file, returns number of points
 int csv_to_txt(const string &file) {
@@ -98,7 +42,7 @@ int csv_to_pts(const string& file, vp3d& pts) {
 #define DBG_ALGO 0
 //credits to the group of Peleg
 namespace algo {
-    line linear_fit(const vp2d& pts) {
+    Line linear_fit(const vp2d& pts) {
         //assume size > 1
         {
             //check if slope is inf
@@ -125,7 +69,7 @@ namespace algo {
         int n = int(pts.size());
         return {x/n,z/n};
     }
-    ld dist(line l, p2d p) {
+    ld dist(Line l, p2d p) {
         return abs((l.m*p.x) - p.z + l.b)/sqrtl((l.m*l.m) + 1);
     }
     p2d func(const vp2d& sec) {
@@ -197,7 +141,12 @@ namespace algo {
 
 
 }
-
+/*
+	closest point on line
+	ld closestX, closestZ;
+	closestX = (m[closestLine]*center[2] + center[0] - m[closestLine]*b[closestLine])/((m[closestLine]*m[closestLine]) + 1);
+	closestZ = (m[closestLine]*center[0] + m[closestLine]*m[closestLine]*center[2] + b[closestLine])/((m[closestLine]*m[closestLine]) + 1);
+*/
 /*
 int main() {
 
