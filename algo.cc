@@ -73,14 +73,20 @@ namespace algo {
         return abs((l.m*p.x) - p.z + l.b)/sqrtl((l.m*l.m) + 1);
     }
     p2d func(const vp2d& sec) {
+        // sort(s.begin(),s.end(),[c](p2d a, p2d b) {
+            // return (a-c).abs() < (b-c).abs();
+        // });
         int n = int(sec.size());
         p2d avg{0.0,0.0};
         for(auto p : sec) avg.x += p.x, avg.z += p.z;
         return avg/n;
 //        return sec[n/2];
     }
-    ld global_best_dist = -1, global_best_angle = 0;
-    pld findAngle(const vp2d& pts, int sa, int off) {
+
+    //Receives set of points, the size of each sector
+    //and the offset of the first sector.
+    //returns pair of exit point, distance.
+    pair<p2d,ld> findExit(const vp2d& pts, int sa, int off) {
         p2d c = center(pts);
         int sc = 360/sa;
         vector<vp2d> sec(sc);
@@ -90,53 +96,54 @@ namespace algo {
             sec[idx].push_back(p);
         }
         //b for best
+        p2d bp = {0.0,0.0};
         ld bd = -1.0; int bi = -1;
         for(int i = 0; i < sc; ++i) {
             auto& s = sec[i];
             if(int(s.size())<=1) continue;
-            sort(s.begin(),s.end(),[c](p2d a, p2d b) {
-                return (a-c).abs() < (b-c).abs();
-            });
-
             p2d point = func(s);
             ld cd = (point-c).abs();
-            if(cd-epsilon > bd) bd = cd, bi = i;
-            if(cd-epsilon > global_best_dist) global_best_dist=cd,global_best_angle = (point-c).positive_angle();
+            if(cd-epsilon > bd) bd = cd, bi = i, bp = point;
         }
-        if(bi==-1) return {500.0,500.0};
-        return {bi*sa+off,(bi+1)*sa+off};
+        if(bi==-1) return {{0.0,0.0},-1.0};
+        return {bp,bd};
     }
-    pld findAngle(const vp2d& pts, int sa) {
-        vpld as;
-        fin(i,0,sa) as.pb(findAngle(pts,sa,i));
-        sort(as.begin(),as.end());
-        while(!as.empty()&&as.back().first>400.0) as.pop_back();
-         if(as.empty()) return {500.0,500.0};
-        int n = int(as.size());
-        //cout << "findAngle("<<sa<<") -> " << as << endl;
-        return as[n/2];
+
+
+    //Receives set of points and the size of each sector
+    //returns pair of exit point, distance.
+    pair<p2d,ld> findExit(const vp2d& pts, int sa) {
+        pair<p2d,ld> ans = {{0.0,0.0},-1.0},cur;
+        //try all offsets and take the best one
+        fin(i,0,sa) {
+            cur = findExit(pts,sa,i);
+            if(cur.second-epsilon > ans.second) ans = cur;
+        }
+        if(cur.second<-epsilon) return {{0.0,0.0},-1.0}; 
+        return ans;
     }
-    ld findAngle(const vp2d& pts) {
+    //return a pair of exit point and distance
+    //if returned distance is negative, no exit point was found
+    pair<p2d,ld> findExit(const vp2d& pts) {
+        //list of sector angles we want to try
+        //must divide 360
         vi sas{2,3,4,5,6,8,10,12,15};
-        vpld ans;
+        vector<pair<p2d,ld>> ans;
         int valid = 0;
         for(int v : sas) {
-            pld c = findAngle(pts,v);
-            if(c.first>400.0) continue;
-            //cout << "findAngle("<<v<<") was valid and returned " << c << endl;
+            pair<p2d,ld> c = findExit(pts,v);
+            if(c.second<-epsilon) continue;
+            //cout  << "findExit("<<v<<") was valid and returned " << c << endl;
             ++valid, ans.pb(c);
         }
-        if(valid==0) { cout << ":(((((((" << endl; exit(1); }
+        if(valid==0) return {{0.0,0.0},-1.0};
         //cout << "global best angle is " << global_best_angle << endl;
         //cout << "center is " << center(pts) << endl;
-        {
-            p2d p = pts[0], c = center(pts);
-            for(auto P : pts) if((P-c).abs()-epsilon>(p-c).abs()) p = P;
-            //cout << "farthest point is " << p << ", angle is " << p.positive_angle() << endl;
-        }
-        ld fans = 0.0;
-        for(auto p : ans ) fans += (p.first+p.second)/2.0;
-        return fans/valid;
+        //might want to process ans differently
+        //sort(ans.begin(),ans.end(),[]())
+        pair<p2d,ld> best = ans[0];
+        for(auto p : ans) if(p.second-epsilon > best.second) best = p;
+        return best;
     }
 
 
@@ -155,7 +162,7 @@ int main() {
 //    int n = csv_to_pts("points",pts3);
     vp2d pts(n);
     for(int i = 0; i < n; ++i) pts[i] = p2d(pts3[i]);
-    ld ang = algo::findAngle(pts);
+    ld ang = algo::findExit(pts);
     cout << "final angle is " << ang << endl;
 
     return 0;

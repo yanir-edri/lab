@@ -24,34 +24,17 @@
 #include "drone.cc"
 //set to true in order to work
 //set to false for debug purposes (hold drone by hands and scan room)
-bool should_fly = false;
+bool should_fly = true;
 atomic<int> secondThreadDone(0);
+atomic<int> scanFinished(0);
+atomic<int> mapPointsReady(0);
 atomic<int> droneLocalized(0);
 
 p3d pos,rot;
+p2d pos2d;
 
 
-
-
-/* deprecated
-ld findScale(Tello& tello) {
-    cout << "findScale called" << endl;
-    p3d cp = pos;
-    int d = 0;
-    while(d < 60) {
-        moveTello(tello,"forward",20,2);
-        d += 20;
-        while(!droneLocalized.load()) usleep(5000);
-    }
-    p3d np = pos;
-    moveTello(tello,"back",60,2);
-    //scale*diff = how much to send tello
-    //scale*diff = 60
-    //scale = 60/diff
-    cout << "found scale!" << endl;
-    return abs(60/(np-cp).abs());
-}*/
-void moveToPoint(Drone& drone, p2d nt, ld scale);
+void moveToPoint(Drone& drone, p2d nt);
 
 void writeToFile(string filename, string content){
     std::ofstream stream(filename);
@@ -78,29 +61,44 @@ void scan(Drone& drone) {
             if (v <= 10) v = 10;
         }
         cout << "angle is now " << angle << endl;
-        drone.goUpDown();
+        //going up and down is now inside drone.rotate()
     }
     // for now, land immeidiatly
     //land(tello);
-    //scanFinished.store(1);
+    scanFinished.store(1);
 }
+vp3d map_points;
 void secondThread(Drone& drone) {
+    cout << "calling scan" << endl;
     scan(drone);
-    cout << "finished scan" << endl;
-    //ld sc = findScale(tello);
-    //writeToFile("/tmp/scale_log.txt","scale is " + to_string(sc));
-    //moveToPoint(drone, {0.0,0.5},1.0);
-    int x;
-    cin >> x;
-    cout << "sleeping..." << endl;
-    usleep(2000000);
-    cout << "LEETSSS GOOOO" << endl;
+    cout << "finished scan :)" << endl;
+    while(!mapPointsReady.load()) usleep(10000);
+    cout << "converting to 2D points..." << endl;
+    int N = int(map_points.size());
+    vp2d map_points_2D(N);
+    for(int i = 0; i < N; ++i) map_points_2D[i] = p2d(map_points[i]);
+    cout << "calling algorithm!" << endl;
+    pair<p2d,ld> res = algo::findExit(map_points_2D);
+    cout << "algorithm returned " << res << endl;
+    cout << "it's angle is " << res.first.positive_angle() << endl;
+    cout << "current angle is about " << p2d(rot).positive_angle() << endl;
+    cout << "please confirm: ";
+    string _USER;
+    cin >> _USER;
+    if(_USER=="y") {
+        if(res.second < -epsilon) {
+            cout << "*********************" << endl;
+            cout << "NO EXIT POINT FOUND!!" << endl;
+            cout << "*********************" << endl;
+        } else {
+            cout << "calling moveToPoint" << endl;
+            moveToPoint(drone,res.first);
+            cout << "moveToPoint done" << endl;
+        }
+    }
+    cout << "second thread is done! :)" << endl;
     secondThreadDone.store(1);
 }
-
-
-
-
 
 p3d matToPoint(cv::Mat m) {
     ld x = ld(m.at<float>(0));
@@ -123,10 +121,10 @@ p3d positionToRotation(cv::Mat m) {
     return matToPoint(res);
 }
 
-
 ld calcRot(p2d r) { //calculate rotation to given vector
+    cout << "calculating rot to " << r << endl;
     ld angle = r.angle()-p2d(rot).angle();
-    angle = (angle*180)/PI;
+    cout << "angle = r.angle() - rot.angle() = " << r.angle() << " - " << p2d(rot).angle() << " = " << angle << endl;
     if(abs(angle)<epsilon) return 0.0;
     return angle;
 }
@@ -134,24 +132,93 @@ void rotateToVector(Drone& drone, p2d r) { //rotate tello to given vector
     ld ar = calcRot(r);
     cout << "angle to rotate = " <<ar << endl;
     if(abs(ar) < epsilon) return;
-    if(abs(ar) < 20+epsilon) {
+    if(abs(ar) < 10-epsilon) {
         cout << "approximately in direction, not rotating" << endl;
         return;
     }
+    int ar_int = llroundl(ar);
+    if(abs(ar_int)<10) { //we checked already if it is smaller than 10, but just in case
+        if(ar_int > 0) ar_int = 10;
+        else ar_int = -10;
+    }
     drone.rotate(ar,2);
-    drone.goUpDown();
     rotateToVector(drone,r);
 }
 
-void moveToPoint(Drone& drone, p2d nt, ld scale) {
-    p2d dir = nt-p2d(pos);
-    cout << "dir is " << dir << endl;
-    rotateToVector(drone, dir);
-    ld dist = dir.abs()*scale;
-    cout << "calling forward with " << int(dist) << endl;
-    drone.move("forward", int(dist), 2);
+//try to relocalize by turning around
+//and turning back when localizing
+//but not turning too much (up to max_angle degrees)
+void relocalize(Drone& drone, int max_angle, int dir) {
+    const int max_v = 25;
+    int angle = 0,v=max_v;
+    while (!droneLocalized.load()) {
+        if (!droneLocalized.load()) {
+            drone.rotate(dir*v,1);
+            angle -= v;
+            v = (v + sra) / 2;
+        } else {
+            if(angle+v > max_angle) {
+                //if we are going to rotate by too much, return
+                drone.rotate(dir*angle,1);
+                return;
+            }
+            drone.rotate(-dir*v,1);
+            angle += v;
+            v = v / 2;
+            if (v <= 10) v = 10;
+        }
+        drone.goUpDown();
+    }
 }
+void moveToPoint(Drone& drone, p2d target) {
+    ld max_dist = 0.0;
+    p2d dir = target-p2d(pos2d),last_pos;
+    while(dir.abs()>max_dist) {
+        cout << "pos="<<pos2d<<",target="<<target<<",dir="<<dir<<endl;
+        last_pos = pos2d;
+        rotateToVector(drone,dir);
+        drone.move("forward",20,2);
+        drone.goUpDown();
+        if(!droneLocalized.load()) {
+            cout << "not localized :(\ntrying to relocalize"<<endl;
+            int current_max_angle = 60;
+            do {
+                cout << "current_max_angle for relocalize is " << current_max_angle << endl;
+                relocalize(drone,current_max_angle,1);
+                if(droneLocalized.load()) break;
+                cout << "trying the other direction" << endl;
+                relocalize(drone,current_max_angle,-1);
+                current_max_angle += 10;
+                if(current_max_angle > 120) {
+                    cout << "couldn't relocalize! aborting :(" << endl;
+                    return;
+                }
+            } while(!droneLocalized.load());
+        }
+        ld dist_trav = (pos2d-last_pos).abs();
+        cout << "traveled " << dist_trav << endl;
+        if(dist_trav-epsilon>max_dist) max_dist = dist_trav; 
+        dir = target-pos2d;
+    }
+    cout << "distance left is " << dir.abs() << ", max dist traveled is " << max_dist << endl;
+    cout << "moveToPoint is done :)" << endl;
+}
+
+//extract map points to global vector map_points
+void extractMapPoints(ORB_SLAM2::System& slam) {
+    vector<ORB_SLAM2::MapPoint*> mapPoints = slam.GetMap()->GetAllMapPoints();
+    map_points.clear();
+    for(auto p : mapPoints) {
+        if(p != nullptr) {
+            auto point = p->GetWorldPos();
+            Eigen::Matrix<double,3,1> v = ORB_SLAM2::Converter::toVector3d(point);
+            map_points.pb({v.x(),v.y(),v.z()});
+        }
+    }
+}
+
 //save data for analysis (saveMap saves points, savePositions saves drone's positions)
+//TODO: replace to extractMapPoints and a simple for loop
 void saveMap(ORB_SLAM2::System &SLAM) {
     cout << "saving map..." << endl;
     std::vector<ORB_SLAM2::MapPoint *> mapPoints =
@@ -177,9 +244,8 @@ void savePositions(vector<p3d>& P)  {
     cout << "done." << endl;
 }
 
-
 //global variables to communicate between threads
-int ret = 0, finish = 0, scanCalled = 0;
+int ret = 0, finish = 0;
 cv::Mat im;
 //takePicture is called on a different thread to ensure our system gets the latest image
 void takePicture() {
@@ -193,6 +259,7 @@ void takePicture() {
         ret = 1;
     }
 }
+
 int main(int argc, char **argv) {
    cout << "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" << endl;
     if (argc != 3) {
@@ -202,7 +269,7 @@ int main(int argc, char **argv) {
     }
     Drone drone;
     if (!drone.init()) return 0;
-    thread picture_thread(takePicture);
+    thread picture_thread(takePicture), scan_thread;
     // Create SLAM system. It initializes all system threads and gets ready to
     // process frames.
     ORB_SLAM2::System SLAM(argv[1], argv[2], ORB_SLAM2::System::MONOCULAR,
@@ -213,31 +280,39 @@ int main(int argc, char **argv) {
     
     // Main loop
     if(should_fly) drone.takeOff();
-    thread scan_thread;
     while (!ret) usleep(5000);
     int i = 0;
     cv::Mat trackRet;
     vector<p3d> positions;
-    bool tmoveUp = false;
+    bool tmoveUp = false, scanCalled = false, extractCalled = false;
     while(!secondThreadDone.load()) {
+        //the i variable helps to syncronize between the main thread
+        //and the pictures thread.
+        //credits to the group of Daniel Greenhut
         i++;
         if (i % 10 != 0) usleep(5000);
         if (im.empty()) {
             cerr << endl << "Failed to load image from camera :(" << endl;
             exit(1);
         }
-        //TrackMonocular returns a 4x4 matrix
+        //TrackMonocular returns an empty matrix if not localized
+        //and a 4 by 4 matrix containing information about rotation and translation
         trackRet = SLAM.TrackMonocular(im, i);
         bool localized = !trackRet.empty();
         droneLocalized.store(localized);
         if(localized) {
+            //compute position and rotation only if localized
             pos = positionToVector(trackRet);
             rot = positionToRotation(trackRet);
-            cout << "pos="<<pos<<",rot="<<rot << '\n';
-            cout << "angle=" << p2d(rot).angle() << '\n';
+            pos2d = p2d(pos);
+            //cout << "pos="<<pos<<",rot="<<rot << '\n';
+            //cout << "angle=" << p2d(rot).angle() << '\n';
             positions.push_back(pos);
         }
         if (localized && !scanCalled) {
+            //secondthread receives a reference of drone,
+            //however this is checked at compile time.
+            //std::ref "converts" drone to reference at "compile-time"
             scan_thread = thread(secondThread, std::ref(drone));
             scanCalled = 1;
         }
@@ -245,6 +320,13 @@ int main(int argc, char **argv) {
             //if we did not localize and did not call scan,
             //we should move the drone to help it localize
             if(i>100&&!tmoveUp) drone.move("up",20),tmoveUp=1;   
+        }
+        if(scanFinished.load() && !extractCalled) {
+            cout << "Extracting map points..." << endl;
+            extractMapPoints(SLAM);
+            cout << "Finished extracting map points :)" << endl;
+            extractCalled = 1;
+            mapPointsReady.store(1);
         }
     }
     finish = 1;
@@ -256,5 +338,8 @@ int main(int argc, char **argv) {
     // imageChoice = -100;
     // Save camera trajectory
     SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory.txt");
+    //join threads and finish execution.
+    picture_thread.join();
+    scan_thread.join();
     return 0;
 }
