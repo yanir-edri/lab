@@ -134,21 +134,23 @@ void rotateToVector(Drone& drone, p2d r) { //rotate tello to given vector
     ld ar = calcRot(r);
     cout << "angle to rotate = " <<ar << endl;
     if(abs(ar) < epsilon) return;
-    if(abs(ar) < 10-epsilon) {
+    if(abs(ar) < 20-epsilon) {
         cout << "approximately in direction, not rotating" << endl;
         return;
     }
     int ar_int = llroundl(ar);
-    if(abs(ar_int)<10) { //we checked already if it is smaller than 10, but just in case
-        if(ar_int > 0) ar_int = 10;
-        else ar_int = -10;
+    if(abs(ar_int)<20) { //we checked already if it is smaller than 10, but just in case
+        if(ar_int > 0) ar_int = 20;
+        else ar_int = -20;
     }
     while(ar_int >= 360) ar_int -= 360;
     while(ar_int <= -360) ar_int += 360;
     if(ar_int > 180) ar_int = 360-ar_int;
     if(ar_int < -180) ar_int += 360;
     int sgn = ar_int > 0 ? 1 : -1;
-    safeRotate(drone,sgn,abs(ar_int));
+    ar_int = abs(ar_int);
+    int ca = min(ar_int, sra);
+    safeRotate(drone,sgn,ca);
     cout << "safeRotate of rotateToVector done, callign rotateToVector again" << endl;
     rotateToVector(drone,r);
 }
