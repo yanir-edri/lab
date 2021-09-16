@@ -45,25 +45,26 @@ void writeToFile(string filename, string content){
 
 //rotate max_angle degrees in direction dir (1,-1)
 //if leaves localization, goes back to relocalize
-void safeRotate(Drone& drone, int dir, int max_angle) {
-    cout << "safeRotate(" << max_angle <<") is called" << endl;
-    int angle = 0, v = sra;
+void safeRotate(Drone& drone, int dir, int angle, int go) {
+    cout << "safeRotate(" << angle <<") is called" << endl;
+    int cur = 0, v = sra;
     if(!should_fly) {
-        cin >> angle; //pretend we're scanning until input is read
+        cin >> cur; //pretend we're scanning until input is read
         return;
     }
-    while (angle < max_angle || !droneLocalized.load()) {
+    while (cur < angle || !droneLocalized.load()) {
         if (droneLocalized.load()) {
-            drone.rotate(-dir*v,1,1);
-            angle += v;
+            int ca = min(v,angle-cur);
+            drone.rotate(dir*ca,go,1);
+            cur += ca;
             v = (v + sra) / 2;
         } else {
-            drone.rotate(dir*v,1,1);
-            angle -= v;
+            drone.rotate(-dir*v,1,1);
+            cur -= v;
             v = v / 2;
             if (v <= 10) v = 10;
         }
-        cout << "angle is now " << angle << endl;
+        cout << "angle is now " << cur << endl;
         //going up and down is now inside drone.rotate()
     }
 }
