@@ -35,8 +35,8 @@ void txt_to_pts_v2(const string &file, vp3d& pts) {
 int csv_to_pts(const string& file, vp3d& pts) {
     int n = csv_to_txt(file);
     pts.resize(n);
-//    txt_to_pts(file,pts);
-    txt_to_pts_v2(file,pts);
+    txt_to_pts(file,pts);
+//    txt_to_pts_v2(file,pts);
     return n;
 }
 #define DBG_ALGO 0
@@ -72,10 +72,11 @@ namespace algo {
     ld dist(Line l, p2d p) {
         return abs((l.m*p.x) - p.z + l.b)/sqrtl((l.m*l.m) + 1);
     }
-    p2d func(const vp2d& sec) {
-        // sort(s.begin(),s.end(),[c](p2d a, p2d b) {
-            // return (a-c).abs() < (b-c).abs();
-        // });
+    p2d func(vp2d& sec, p2d c) {
+        sort(sec.begin(),sec.end(), [c](p2d a, p2d b) {
+            return (a - c).abs() < (b - c).abs();
+        });
+        return sec[int(sec.size())/2];
         int n = int(sec.size());
         p2d avg{0.0,0.0};
         for(auto p : sec) avg.x += p.x, avg.z += p.z;
@@ -101,7 +102,7 @@ namespace algo {
         for(int i = 0; i < sc; ++i) {
             auto& s = sec[i];
             if(int(s.size())<=1) continue;
-            p2d point = func(s);
+            p2d point = func(s,c);
             ld cd = (point-c).abs();
             if(cd-epsilon > bd) bd = cd, bi = i, bp = point;
         }
@@ -111,7 +112,7 @@ namespace algo {
 
 
     //Receives set of points and the size of each sector
-    //returns pair of exit point, distance.
+    //returns pair of func(exit point section), farthest point in exit
     pair<p2d,ld> findExit(const vp2d& pts, int sa) {
         pair<p2d,ld> ans = {{0.0,0.0},-1.0},cur;
         //try all offsets and take the best one
@@ -133,7 +134,8 @@ namespace algo {
         for(int v : sas) {
             pair<p2d,ld> c = findExit(pts,v);
             if(c.second<-epsilon) continue;
-            //cout  << "findExit("<<v<<") was valid and returned " << c << endl;
+//            cout  << "findExit("<<v<<") was valid and returned " << c << endl;
+//            cout << "which has angle " << c.first.positive_angle() << endl;
             ++valid, ans.pb(c);
         }
         if(valid==0) return {{0.0,0.0},-1.0};

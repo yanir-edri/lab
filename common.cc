@@ -38,7 +38,7 @@ const ld epsilon = 1e-6;
 
 //Scan Rotation Angle and Scan Vertical Movement respectively
 #define svm 20
-#define sra 30
+#define sra 25
 
 //A struct that represents a point in 2D 
 //under x,z coordinates
@@ -126,4 +126,26 @@ template<class T> ostream& operator<<(ostream& os, vector<T> v) {
     return os << ']';
 }
 
+//A small helper function to convert 3x1 vector to our p3d class
+p3d matToPoint(cv::Mat m) {
+    ld x = ld(m.at<float>(0));
+    ld y = ld(m.at<float>(1));
+    ld z = ld(m.at<float>(2));
+    return {x,y,z};
+}
+//A reliable sleep function.
+void csleep(int ms) {
+    this_thread::sleep_for(milliseconds(ms));
+}
+double time_since_start() {
+    static bool init = false;
+    static chrono::time_point<high_resolution_clock> start;
+    if(!init) {
+        start = high_resolution_clock::now();
+        init = true;
+    }
+    auto cur = high_resolution_clock::now();
+    duration<double> dur = (cur-start);
+    return dur.count();
+}
 #endif

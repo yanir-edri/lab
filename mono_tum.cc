@@ -43,19 +43,22 @@ void writeToFile(string filename, string content){
     stream.close();
 }
 
-void scan(Drone& drone) {
+//rotate max_angle degrees in direction dir (1,-1)
+//if leaves localization, goes back to relocalize
+void safeRotate(Drone& drone, int dir, int max_angle) {
+    cout << "safeRotate(" << max_angle <<") is called" << endl;
     int angle = 0, v = sra;
     if(!should_fly) {
         cin >> angle; //pretend we're scanning until input is read
         return;
     }
-    while (angle < 360 || !droneLocalized.load()) {
+    while (angle < max_angle || !droneLocalized.load()) {
         if (droneLocalized.load()) {
-            drone.rotate(-v,1);
+            drone.rotate(-dir*v,1,1);
             angle += v;
             v = (v + sra) / 2;
         } else {
-            drone.rotate(v,1);
+            drone.rotate(dir*v,1,1);
             angle -= v;
             v = v / 2;
             if (v <= 10) v = 10;
@@ -63,8 +66,10 @@ void scan(Drone& drone) {
         cout << "angle is now " << angle << endl;
         //going up and down is now inside drone.rotate()
     }
-    // for now, land immeidiatly
-    //land(tello);
+}
+
+void scan(Drone& drone) {
+    safeRotate(drone,1,360);
     scanFinished.store(1);
 }
 vp3d map_points;
@@ -79,12 +84,14 @@ void secondThread(Drone& drone) {
     for(int i = 0; i < N; ++i) map_points_2D[i] = p2d(map_points[i]);
     cout << "calling algorithm!" << endl;
     pair<p2d,ld> res = algo::findExit(map_points_2D);
+    drone.goUpDown(); //to avoid inactivity
     cout << "algorithm returned " << res << endl;
     cout << "it's angle is " << res.first.positive_angle() << endl;
     cout << "current angle is about " << p2d(rot).positive_angle() << endl;
     cout << "please confirm: ";
-    string _USER;
-    cin >> _USER;
+    // drone.goUpDown();
+    string _USER = "y";
+    // cin >> _USER;
     if(_USER=="y") {
         if(res.second < -epsilon) {
             cout << "*********************" << endl;
@@ -100,12 +107,6 @@ void secondThread(Drone& drone) {
     secondThreadDone.store(1);
 }
 
-p3d matToPoint(cv::Mat m) {
-    ld x = ld(m.at<float>(0));
-    ld y = ld(m.at<float>(1));
-    ld z = ld(m.at<float>(2));
-    return {x,y,z};
-}
 
 //in these two functions we took inspiration from 
 // https://math.stackexchange.com/a/84202
@@ -123,8 +124,8 @@ p3d positionToRotation(cv::Mat m) {
 
 ld calcRot(p2d r) { //calculate rotation to given vector
     cout << "calculating rot to " << r << endl;
-    ld angle = r.angle()-p2d(rot).angle();
-    cout << "angle = r.angle() - rot.angle() = " << r.angle() << " - " << p2d(rot).angle() << " = " << angle << endl;
+    ld angle = r.positive_angle()-p2d(rot).positive_angle();
+    cout << "angle = r.angle() - rot.angle() = " << r.positive_angle() << " - " << p2d(rot).positive_angle() << " = " << angle << endl;
     if(abs(angle)<epsilon) return 0.0;
     return angle;
 }
@@ -141,7 +142,13 @@ void rotateToVector(Drone& drone, p2d r) { //rotate tello to given vector
         if(ar_int > 0) ar_int = 10;
         else ar_int = -10;
     }
-    drone.rotate(ar,2);
+    while(ar_int >= 360) ar_int -= 360;
+    while(ar_int <= -360) ar_int += 360;
+    if(ar_int > 180) ar_int = 360-ar_int;
+    if(ar_int < -180) ar_int += 360;
+    int sgn = ar_int > 0 ? 1 : -1;
+    safeRotate(drone,sgn,abs(ar_int));
+    cout << "safeRotate of rotateToVector done, callign rotateToVector again" << endl;
     rotateToVector(drone,r);
 }
 
@@ -153,21 +160,20 @@ void relocalize(Drone& drone, int max_angle, int dir) {
     int angle = 0,v=max_v;
     while (!droneLocalized.load()) {
         if (!droneLocalized.load()) {
-            drone.rotate(dir*v,1);
+            drone.rotate(dir*v,1,1);
             angle -= v;
             v = (v + sra) / 2;
         } else {
             if(angle+v > max_angle) {
                 //if we are going to rotate by too much, return
-                drone.rotate(dir*angle,1);
+                drone.rotate(dir*angle,1,1);
                 return;
             }
-            drone.rotate(-dir*v,1);
+            drone.rotate(-dir*v,0,1);
             angle += v;
             v = v / 2;
             if (v <= 10) v = 10;
         }
-        drone.goUpDown();
     }
 }
 void moveToPoint(Drone& drone, p2d target) {
@@ -319,7 +325,7 @@ int main(int argc, char **argv) {
         if(!localized&& !scanCalled) {
             //if we did not localize and did not call scan,
             //we should move the drone to help it localize
-            if(i>100&&!tmoveUp) drone.move("up",20),tmoveUp=1;   
+            //if(i>100&&!tmoveUp) drone.move("up",20),tmoveUp=1;   
         }
         if(scanFinished.load() && !extractCalled) {
             cout << "Extracting map points..." << endl;
